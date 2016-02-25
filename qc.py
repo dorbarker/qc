@@ -11,10 +11,10 @@ def arguments():
     parser.add_argument('--fasta-parent-dir', required = True,
                         help = 'Parent directory of FASTA groups')
 
-    parser.add_argument('--gc-cutoff', nargs = 2, type = float, required = True,
+    parser.add_argument('--gc-cutoff', nargs = 2, type = float, metavar = ('LOW', 'HIGH'), required = True,
                         help = 'Lower and upper bounds for GC content')
 
-    parser.add_argument('--size-cutoff', nargs =2, type = int, required = True,
+    parser.add_argument('--size-cutoff', nargs = 2, type = int, metavar = ('LOW', 'HIGH'), required = True,
                         help = 'Lower and upper bounds of genome size (bp)')
 
     parser.add_argument('--cores', type = int, default = cpu_count(), help = 'CPUs to use')
@@ -99,9 +99,10 @@ def size_filter(parent_dir, low, high):
 
     for fd in fasta_dirs:
         
-         get_size = lambda d, f: os.path.getsize(os.path.join(d, f))
-
-         bad_size_dict[fd + '_quast_report'] = [os.path.splitext(x)[0] for x in os.listdir(fd)
+        get_size = lambda d, f: os.path.getsize(os.path.join(d, f))
+            
+        # add '_quast_report' to simplify file writing later
+        bad_size_dict[fd + '_quast_report'] = [os.path.splitext(x)[0] for x in os.listdir(fd)
                               if '.fasta' in x and not low <= get_size(fd, x) <= high]
 
     return bad_size_dict
@@ -138,21 +139,21 @@ def name_collisions(report_path, bad):
         return d
 
     def name_n50_pairs(report_path, bad):
-        
+        '''Returns dictionary of strain names and their N50 values'''
+
         with open(report_path, 'r') as f:
 
             for line in f:
                 if 'Assembly' in line:
                     names = line.strip().split('\t')[1:]
                 elif 'N50' in line:
-                    n50s = line.strip().split('\t')[1:]
+                    n50s = map(int, line.strip().split('\t')[1:])
                 else:
                     continue
 
-        return {name: int(n50) for name, n50 in zip(names, n50s) if name not in bad}
+        return {name: n50 for name, n50 in zip(names, n50s) if name not in bad}
    
     def get_bad_twins(matched_names, names_n50s):
-        
         '''For twinned names, give a list of the versions with
         less than the best N50
         '''
@@ -181,7 +182,12 @@ def name_collisions(report_path, bad):
 
     return bad_original_names
 
-def fix_names(parent_dir, bad):
+def correct_names(parent_dir, bad):
+    '''Handle running of name_collions on each fasta directory.
+
+    Return a dictionary of the 'losing' names in the cases of 
+    name collisions.
+    '''
 
     report_dirs = [os.path.join(parent_dir, d) for d in os.listdir(parent_dir) if 'quast_report' in d]
     
@@ -232,7 +238,7 @@ def extract_good(parent_dir, all_bad, copy_func):
                     copy_func(src, dst)
                 
                 except OSError:
-                    os.remove(dst)
+                    os.remove(dst) # os.symlink fails if dst already exists
                     copy_func(src, dst)
 
 def write_reasons(*args):
@@ -246,7 +252,7 @@ def write_reasons(*args):
                 bydir[directory].extend(method[directory])
             except KeyError:
                 bydir[directory] = method[directory]
-    print bydir
+    r
     for d in bydir:
         with open(os.path.join(d, 'bad_genomes.txt'), 'w') as f:
             f.write( '\n'.join(set(bydir[d])) )
@@ -268,7 +274,7 @@ def main():
     
     bad_so_far = merge_bad(duds, bad_gc, bad_size)
     
-    bad_names = fix_names(args.fasta_parent_dir, bad_so_far)    
+    bad_names = correct_names(args.fasta_parent_dir, bad_so_far)    
     
     all_bad = merge_bad(duds, bad_gc, bad_size, bad_names)
     
