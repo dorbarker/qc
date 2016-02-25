@@ -195,13 +195,14 @@ def fix_names(parent_dir, bad):
     return bad_name_dict
 
 def merge_bad(*args):
+    '''Flattens dictionary of bad genomes into a set'''
 
     bad = set()
-    
+     
     for method in args:
         for directory in method:
-            for fucker in method[directory]:
-                bad.add(fucker)
+            for genome in method[directory]:
+                bad.add(genome)
     return bad
 
 def extract_good(parent_dir, all_bad, copy_func):
@@ -234,6 +235,22 @@ def extract_good(parent_dir, all_bad, copy_func):
                     os.remove(dst)
                     copy_func(src, dst)
 
+def write_reasons(*args):
+    '''Write a list of bad genomes to the relevant
+    *_quast_report directory
+    '''
+    bydir = {}
+    for method in args:
+        for directory in method:
+            try:
+                bydir[directory].extend(method[directory])
+            except KeyError:
+                bydir[directory] = method[directory]
+    print bydir
+    for d in bydir:
+        with open(os.path.join(d, 'bad_genomes.txt'), 'w') as f:
+            f.write( '\n'.join(set(bydir[d])) )
+
 def main():
     
     args = arguments()
@@ -255,6 +272,8 @@ def main():
     
     all_bad = merge_bad(duds, bad_gc, bad_size, bad_names)
     
+    write_reasons(duds, bad_gc, bad_size, bad_names)
+
     extract_good(args.fasta_parent_dir, all_bad, copy_func)
 
 if __name__ == '__main__':
