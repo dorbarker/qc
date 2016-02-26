@@ -16,6 +16,8 @@ def arguments():
 
     parser.add_argument('--size-cutoff', nargs = 2, type = int, metavar = ('LOW', 'HIGH'), required = True,
                         help = 'Lower and upper bounds of genome size (bp)')
+    
+    parser.add_argument('--prefix', nargs = '+', help = 'Prefices to consider when removing duplicates')
 
     parser.add_argument('--cores', type = int, default = cpu_count(), help = 'CPUs to use')
    
@@ -107,14 +109,24 @@ def size_filter(parent_dir, low, high):
 
     return bad_size_dict
 
-def fix_name(name):
+def fix_name(name, prefices):
     '''Replace special characters with underscores'''
+    
+    def strip_prefix(s, p):
+        return s[s.startswith(p) and len(p):]
+
     n = name
+    
     for c in '-:;\', )(][\\':
         n = n.replace(c, '_')
+    
+    for p in prefices:
+
+        n = strip_prefix(n, p)
+
     return n
 
-def name_collisions(report_path, bad):
+def name_collisions(report_path, prefix, bad):
     '''Fixes naming conventions for a strain group.
 
     Collisions are handled by adding adding every duplicate
@@ -174,7 +186,7 @@ def name_collisions(report_path, bad):
     
     original_names = names_n50s.keys()
     
-    fixed_names = [fix_name(name) for name in original_names]
+    fixed_names = [fix_name(name, prefix) for name in original_names]
     
     matched_names = match_names(fixed_names, original_names)
     
@@ -182,7 +194,7 @@ def name_collisions(report_path, bad):
 
     return bad_original_names
 
-def correct_names(parent_dir, bad):
+def correct_names(parent_dir, prefix, bad):
     '''Handle running of name_collions on each fasta directory.
 
     Return a dictionary of the 'losing' names in the cases of 
@@ -196,7 +208,7 @@ def correct_names(parent_dir, bad):
     for rd in report_dirs:
 
         report_path = os.path.join(rd, 'report.tsv') 
-        bad_name_dict[rd] =  name_collisions(report_path, bad)
+        bad_name_dict[rd] =  name_collisions(report_path, prefix, bad)
     
     return bad_name_dict
 
@@ -211,7 +223,7 @@ def merge_bad(*args):
                 bad.add(genome)
     return bad
 
-def extract_good(parent_dir, all_bad, copy_func):
+def extract_good(parent_dir, prefix, all_bad, copy_func):
     '''Symlinks good genomes to new folders in the parent_dir'''
     
     fasta_dirs = [d for d in os.listdir(parent_dir) if 'quast_report' not in d]
@@ -232,7 +244,7 @@ def extract_good(parent_dir, all_bad, copy_func):
             if fas not in all_bad:
 
                 src = os.path.join(full_fasta_dir_path, fasta)
-                dst = os.path.join(outdir, fix_name(fas) + '.fasta')
+                dst = os.path.join(outdir, fix_name(fas, prefix) + '.fasta')
 
                 try:
                     copy_func(src, dst)
@@ -252,7 +264,7 @@ def write_reasons(*args):
                 bydir[directory].extend(method[directory])
             except KeyError:
                 bydir[directory] = method[directory]
-    r
+    
     for d in bydir:
         with open(os.path.join(d, 'bad_genomes.txt'), 'w') as f:
             f.write( '\n'.join(set(bydir[d])) )
@@ -274,13 +286,13 @@ def main():
     
     bad_so_far = merge_bad(duds, bad_gc, bad_size)
     
-    bad_names = correct_names(args.fasta_parent_dir, bad_so_far)    
+    bad_names = correct_names(args.fasta_parent_dir, args.prefix, bad_so_far)    
     
     all_bad = merge_bad(duds, bad_gc, bad_size, bad_names)
     
     write_reasons(duds, bad_gc, bad_size, bad_names)
 
-    extract_good(args.fasta_parent_dir, all_bad, copy_func)
+    extract_good(args.fasta_parent_dir, args.prefix, all_bad, copy_func)
 
 if __name__ == '__main__':
     main()
