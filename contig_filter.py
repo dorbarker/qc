@@ -1,5 +1,6 @@
 from Bio.Blast import NCBIWWW, NCBIXML
 from Bio import SeqIO
+from time import sleep
 import os
 import argparse
 
@@ -7,9 +8,8 @@ def arguments():
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--kmer', type = int)
-    
-    parser.add_argument('--fasta-dir')
+    parser.add_argument('--fasta-dir', required = True,
+                        help = 'Directory containing FASTA files')
     
     parser.add_argument('--organism', required = True,
                         help = 'Name of the organism the contigs \
@@ -25,26 +25,20 @@ def arguments():
                                 GenBank (default = 100)')
     
     parser.add_argument('--hits', type = int, default = 50,
-                        help = 'Number top hits to consider')
+                        help = 'Number top hits to consider (default = 50)')
 
     return parser.parse_args()
 
 def gc_content(seq):
+     '''Returns GC content of seq'''
 
-     return round(sum(1.0 for x in seq if x in ('G','C')) / len(seq), 5)
-
-def scan_contig(contig, kmer_width):
-
-    gc = []
-
-    for start in range(len(contig)):
-        
-        gc.append( gc_content(contig[start : start + kmer_width]) )
-
-    
-    return sum(gc) / len(gc)
+     return sum(1.0 for x in seq if x in ('G','C')) / len(seq)
 
 def select_checkables(fasta_dir, fragment, low, high):
+    '''Checks each contig in each FASTA for GC content.
+
+    Out-of-range GC contents are later checked against GenBank.
+    '''
 
     checkables = {}
 
@@ -53,21 +47,41 @@ def select_checkables(fasta_dir, fragment, low, high):
         checkables[fasta] = {}
 
         with open(fasta, 'r') as f:
+            
+            records = 0.0
+
             for rec in SeqIO.parse(f, 'fasta'):
                 
+                records += 1.0
+
                 name = rec.id
-                s    = str(rec.seq)[:fragment]
-                gc   = scan_contig(s)
+                s    = str(rec.seq)
+                gc   = gc_content(s)
 
                 if not low <= gc <= high:
 
-                    checkables[fasta][name] = s
+                    checkables[fasta][name] = s[:fragment]
+            
+            # If 3/4 contigs have the wrong GC, then the whole isolate
+            # will be discarded at a later step and there's
+            # no need to make all those BLAST searches
+
+            if records / len(checkables[fasta]) >= 0.75:
+                del checkables[fasta]
 
     return checkables
 
 def query_genbank(checkable, organism, hits):
+    '''Any contigs identified in select_checkables() are queried against
+    NCBI GenBank using a fragment from the beginning of the contig. 
+    
+    If the `organism` CLI argument is not found retrieved hits,
+    the contig is flagged for removal
+    '''
+
 
     axe = {}
+    redo = {}
 
     for fasta in checkable:
         axe[fasta] = []
@@ -85,10 +99,13 @@ def query_genbank(checkable, organism, hits):
                             
             if not any(cj_in_title):
                 axe[fasta].append(contig)
+            
+            sleep(2) # avoid hitting NCBI with too many requests
 
     return axe
 
 def remove_bad_contigs(axe):
+    '''Overwrites FASTAs minus any contigs flagged in query_genbank()'''
 
     for fasta in axe:
         towrite = []
@@ -108,6 +125,12 @@ def remove_bad_contigs(axe):
 def main():
 
     args = arguments()
+    
+    checkable = select_checkables(args.fasta_dir, args.fragment, *args.gc_cutoff)
+    
+    axe = query_genbank(checkable, args.organism, args.hits)
+    
+    remove_bad_contigs(axe)
 
 if __name__ == '__main__':
     main()
