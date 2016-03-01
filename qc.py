@@ -1,6 +1,7 @@
 import argparse
 import os
 import subprocess
+import contig_filter
 from multiprocessing import cpu_count
 from shutil import copyfile
 
@@ -18,6 +19,16 @@ def arguments():
                         help = 'Lower and upper bounds of genome size (bp)')
     
     parser.add_argument('--prefix', nargs = '+', help = 'Prefices to consider when removing duplicates')
+    
+    parser.add_argument('--organism', required = True, help = 'Name of the organism to which \
+                                                              the contigs *should belong')
+
+    parser.add_argument('--fragment', type = int, default = 100, help = 'Size (bp) of contig fragment \
+                                                                        used to query GenBank \
+                                                                        (default = 100)')
+
+    parser.add_argument('--hits', type = int, default = 50, help = 'Number of BLAST hits to consider \
+                                                                 during contig filtering (default = 50)')
 
     parser.add_argument('--cores', type = int, default = cpu_count(), help = 'CPUs to use')
    
@@ -85,7 +96,7 @@ def gc_filter(parent_dir, low, high):
                 else:
                     continue
             
-            bad_gc_dict[rd] = [name for name, gc in zip(names,gcs) if not low <= gc <= high]
+            bad_gc_dict[rd] = [name for name, gc in zip(names, gcs) if not low <= gc <= high]
 
     return bad_gc_dict
 
@@ -269,12 +280,29 @@ def write_reasons(*args):
         with open(os.path.join(d, 'bad_genomes.txt'), 'w') as f:
             f.write( '\n'.join(set(bydir[d])) )
 
+def gc_filter_contigs(parent_dir, fragment, gc_cutoff, organism, hits):
+    '''Check individual contigs for GC content.
+
+    Contigs with out-of-range GC content are checked against GenBank.
+
+    If none of the top hits are the correct organism, the contig is discarded
+    '''
+    
+    fasta_dirs = [d for d in os.listdir(parent_dir) if 'quast_report' not in d]
+
+    for fasta_dir in fasta_dirs:
+        contig_filter.filter_contigs(fasta_dir, fragment,
+                                    gc_cutoff, organism, hits)
+
 def main():
     
     args = arguments()
     
     copy_func = copyfile if args.copy else os.symlink
     
+    gc_filter_contigs(args.fasta_parent_dir, args.fragment, args.gc_cutoff,
+                      args.organism, args.hits)
+
     if not args.skip_quast:
         run_quast(args.fasta_parent_dir, args.cores)
     

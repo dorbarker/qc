@@ -116,10 +116,12 @@ def remove_bad_contigs(axe):
 
                 if name not in axe[fasta]:
                     towrite.append(rec)
+                else:
+                    print "Removing contig {} from FASTA {}".format(name, fasta)
         
         with open(fasta, 'w') as j:
 
-            SeqIO.write(towrote, j, 'fasta')
+            SeqIO.write(towrite, j, 'fasta')
 
 def filter_contigs(fasta_dir, fragment, gc_cutoff, organism, hits):
     '''All functions except the argument parser.'''
@@ -135,7 +137,7 @@ def main():
 
     args = arguments()
     
-    filter_contigs(args.fasta_dir, args.fragment, args.gc_cutoff, args.organism, args.hits)
+    filter_contigs(args.fasta_dir, args.fragment, args.gc_cutoff,
                    args.gc_cutoff, args.organism, args.hits)
 
 if __name__ == '__main__':
