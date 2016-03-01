@@ -121,16 +121,22 @@ def remove_bad_contigs(axe):
 
             SeqIO.write(towrote, j, 'fasta')
 
+def filter_contigs(fasta_dir, fragment, gc_cutoff, organism, hits):
+    '''All functions except the argument parser.'''
+    
+    checkable = select_checkables(fasta_dir, fragment, *gc_cutoff)
+    
+    axe = query_genbank(checkable, organism, hits)
+    
+    remove_bad_contigs(axe)
+
 
 def main():
 
     args = arguments()
     
-    checkable = select_checkables(args.fasta_dir, args.fragment, *args.gc_cutoff)
-    
-    axe = query_genbank(checkable, args.organism, args.hits)
-    
-    remove_bad_contigs(axe)
+    filter_contigs(args.fasta_dir, args.fragment, args.gc_cutoff, args.organism, args.hits)
+                   args.gc_cutoff, args.organism, args.hits)
 
 if __name__ == '__main__':
     main()
