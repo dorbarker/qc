@@ -19,6 +19,8 @@ def arguments():
                         required = True, metavar = ('LOW', 'HIGH'), 
                         help = 'GC contents outside this range \
                                 will be queried against GenBank')
+    parser.add_argument('--min-contig', type = int, default = 500,
+                        help = 'Minimum contig size for inclusion (default = 500 bp)')
 
     parser.add_argument('--fragment', type = int, default = 100,
                         help = 'Size (bp) of contig fragment used to query \
@@ -32,23 +34,28 @@ def arguments():
 def gc_content(seq):
      '''Returns GC content of seq'''
 
-     return sum(1.0 for x in seq if x in ('G','C')) / len(seq)
+     return 100.0 * sum(1.0 for x in seq if x in ('G','C')) / len(seq)
 
-def select_checkables(fasta_dir, fragment, low, high):
+def select_checkables(fasta_dir, fragment, min_contig, low, high):
     '''Checks each contig in each FASTA for GC content.
 
     Out-of-range GC contents are later checked against GenBank.
     '''
 
     checkables = {}
+    too_short = {}
 
-    for fasta in (os.path.join(fastq_dir, x) for x in os.listdir(fasta_dir)):
+    for fasta in (os.path.join(fasta_dir, x) for x in os.listdir(fasta_dir)):
         
         checkables[fasta] = {}
 
+        too_short[fasta] = []
+        
         with open(fasta, 'r') as f:
             
             records = 0.0
+            total_len = 0.0
+            bad_len = 0.0
 
             for rec in SeqIO.parse(f, 'fasta'):
                 
@@ -57,18 +64,28 @@ def select_checkables(fasta_dir, fragment, low, high):
                 name = rec.id
                 s    = str(rec.seq)
                 gc   = gc_content(s)
+                
+                if len(s) < min_contig:
+                    too_short[fasta].append(name)
+                    continue
+
+                total_len += len(s)
 
                 if not low <= gc <= high:
 
                     checkables[fasta][name] = s[:fragment]
-            
-            # If 3/4 contigs have the wrong GC, then the whole isolate
+                    bad_len += len(s)
+
+            # If 3/4 total contig length have the wrong GC, then the whole isolate
             # will be discarded at a later step and there's
             # no need to make all those BLAST searches
-
-            if records / len(checkables[fasta]) >= 0.75:
-                del checkables[fasta]
-
+            
+            try:
+                if bad_len / total_len >= 0.75:
+                    del checkables[fasta]
+            except ZeroDivisionError:
+                del checkables[fasta] # Wouldn't have been queried anyway
+            
     return checkables
 
 def query_genbank(checkable, organism, hits):
@@ -79,13 +96,11 @@ def query_genbank(checkable, organism, hits):
     the contig is flagged for removal
     '''
 
-
     axe = {}
-    redo = {}
 
     for fasta in checkable:
         axe[fasta] = []
-        for contig in fasta:
+        for contig in checkable[fasta]:
             handle = NCBIWWW.qblast('blastn', 'nt', checkable[fasta][contig],
                      megablast = True, hitlist_size = hits, alignments = hits)
 
@@ -101,7 +116,7 @@ def query_genbank(checkable, organism, hits):
                 axe[fasta].append(contig)
             
             sleep(2) # avoid hitting NCBI with too many requests
-
+    print axe
     return axe
 
 def remove_bad_contigs(axe):
@@ -123,10 +138,10 @@ def remove_bad_contigs(axe):
 
             SeqIO.write(towrite, j, 'fasta')
 
-def filter_contigs(fasta_dir, fragment, gc_cutoff, organism, hits):
+def filter_contigs(fasta_dir, fragment, min_contig, gc_cutoff,  organism, hits):
     '''All functions except the argument parser.'''
     
-    checkable = select_checkables(fasta_dir, fragment, *gc_cutoff)
+    checkable = select_checkables(fasta_dir, fragment, min_contig, *gc_cutoff)
     
     axe = query_genbank(checkable, organism, hits)
     
@@ -137,8 +152,8 @@ def main():
 
     args = arguments()
     
-    filter_contigs(args.fasta_dir, args.fragment, args.gc_cutoff,
-                   args.gc_cutoff, args.organism, args.hits)
+    filter_contigs(args.fasta_dir, args.fragment, args.min_contig, 
+            args.gc_cutoff, args.gc_cutoff, args.organism, args.hits)
 
 if __name__ == '__main__':
     main()

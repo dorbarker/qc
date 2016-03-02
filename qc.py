@@ -26,6 +26,8 @@ def arguments():
     parser.add_argument('--fragment', type = int, default = 100, help = 'Size (bp) of contig fragment \
                                                                         used to query GenBank \
                                                                         (default = 100)')
+    parser.add_argument('--min-contig', type = int, default = 500, help = 'Minimum contig size for \
+                                                                          inclusion (default = 500 bp)')
 
     parser.add_argument('--hits', type = int, default = 50, help = 'Number of BLAST hits to consider \
                                                                  during contig filtering (default = 50)')
@@ -38,7 +40,7 @@ def arguments():
 
     return parser.parse_args()
 
-def run_quast(parent_dir, ncpu):
+def run_quast(parent_dir, min_contig, ncpu):
     '''Runs Quast on each subdirectory (presumably full of fastas)
     of the parent directory.
     
@@ -55,7 +57,7 @@ def run_quast(parent_dir, ncpu):
         s = os.path.join(parent_dir, subdir)
         
         fastas = [os.path.join(s, f) for f in os.listdir(s)]
-        cmd = [quastpath, '--threads', str(ncpu), '--no-plots', '--no-html',
+        cmd = [quastpath, '--threads', str(ncpu), '--min-contig', min_contig, '--no-plots', '--no-html',
                '--output-dir', os.path.join(parent_dir, subdir + '_quast_report')]
         cmd.extend(fastas)
         
@@ -78,7 +80,7 @@ def flag_duds(parent_dir):
                     
     return duds_dict
 
-def gc_filter(parent_dir, low, high):
+def gc_filter_genomes(parent_dir, low, high):
     '''Flags genomes with out-of-range GC content'''
 
     report_dirs = [os.path.join(parent_dir, d) for d in os.listdir(parent_dir) if 'quast_report' in d]
@@ -131,9 +133,10 @@ def fix_name(name, prefices):
     for c in '-:;\', )(][\\':
         n = n.replace(c, '_')
     
-    for p in prefices:
+    if prefices != None: 
+        for p in prefices:
 
-        n = strip_prefix(n, p)
+            n = strip_prefix(n, p)
 
     return n
 
@@ -280,7 +283,7 @@ def write_reasons(*args):
         with open(os.path.join(d, 'bad_genomes.txt'), 'w') as f:
             f.write( '\n'.join(set(bydir[d])) )
 
-def gc_filter_contigs(parent_dir, fragment, gc_cutoff, organism, hits):
+def gc_filter_contigs(parent_dir, fragment, min_contig, gc_cutoff, organism, hits):
     '''Check individual contigs for GC content.
 
     Contigs with out-of-range GC content are checked against GenBank.
@@ -291,7 +294,7 @@ def gc_filter_contigs(parent_dir, fragment, gc_cutoff, organism, hits):
     fasta_dirs = [d for d in os.listdir(parent_dir) if 'quast_report' not in d]
 
     for fasta_dir in fasta_dirs:
-        contig_filter.filter_contigs(fasta_dir, fragment,
+        contig_filter.filter_contigs(fasta_dir, fragment, min_contig,
                                     gc_cutoff, organism, hits)
 
 def main():
@@ -300,15 +303,15 @@ def main():
     
     copy_func = copyfile if args.copy else os.symlink
     
-    gc_filter_contigs(args.fasta_parent_dir, args.fragment, args.gc_cutoff,
-                      args.organism, args.hits)
+    gc_filter_contigs(args.fasta_parent_dir, args.fragment, args.min_contig,
+            args.gc_cutoff, args.organism, args.hits)
 
     if not args.skip_quast:
-        run_quast(args.fasta_parent_dir, args.cores)
+        run_quast(args.fasta_parent_dir, args.min_contig, args.cores)
     
     duds = flag_duds(args.fasta_parent_dir)
     
-    bad_gc = gc_filter(args.fasta_parent_dir, *args.gc_cutoff)
+    bad_gc = gc_filter_genomes(args.fasta_parent_dir, *args.gc_cutoff)
     
     bad_size = size_filter(args.fasta_parent_dir, *args.size_cutoff)    
     
