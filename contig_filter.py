@@ -97,10 +97,13 @@ def query_genbank(checkable, organism, hits):
     '''
 
     axe = {}
-
+    
     for fasta in checkable:
+        
         axe[fasta] = []
+        
         for contig in checkable[fasta]:
+       
             handle = NCBIWWW.qblast('blastn', 'nt', checkable[fasta][contig],
                      megablast = True, hitlist_size = hits, alignments = hits)
 
@@ -116,7 +119,7 @@ def query_genbank(checkable, organism, hits):
                 axe[fasta].append(contig)
             
             sleep(2) # avoid hitting NCBI with too many requests
-    print axe
+    print(axe)
     return axe
 
 def remove_bad_contigs(axe):
@@ -132,7 +135,7 @@ def remove_bad_contigs(axe):
                 if name not in axe[fasta]:
                     towrite.append(rec)
                 else:
-                    print "Removing contig {} from FASTA {}".format(name, fasta)
+                    print("Removing contig {} from FASTA {}".format(name, fasta))
         
         with open(fasta, 'w') as j:
 

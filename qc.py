@@ -2,6 +2,7 @@ import argparse
 import os
 import subprocess
 import contig_filter
+import version_control
 from multiprocessing import cpu_count
 from shutil import copyfile
 
@@ -296,11 +297,13 @@ def gc_filter_contigs(parent_dir, fragment, min_contig, gc_cutoff, organism, hit
     for fasta_dir in fasta_dirs:
         contig_filter.filter_contigs(fasta_dir, fragment, min_contig,
                                     gc_cutoff, organism, hits)
-
+        
 def main():
     
     args = arguments()
     
+    version_control.commit(args.fasta_parent_dir, args)
+
     copy_func = copyfile if args.copy else os.symlink
     
     gc_filter_contigs(args.fasta_parent_dir, args.fragment, args.min_contig,
@@ -324,6 +327,9 @@ def main():
     write_reasons(duds, bad_gc, bad_size, bad_names)
 
     extract_good(args.fasta_parent_dir, args.prefix, all_bad, copy_func)
+    
+    # temporary diagnostic placement - move later
+    version_control.commit(args.fasta_parent_dir, args)
 
 if __name__ == '__main__':
     main()
