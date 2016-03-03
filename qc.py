@@ -4,7 +4,6 @@ import subprocess
 import contig_filter
 import version_control
 from multiprocessing import cpu_count
-from shutil import copyfile
 
 def arguments():
 
@@ -36,8 +35,6 @@ def arguments():
     parser.add_argument('--cores', type = int, default = cpu_count(), help = 'CPUs to use')
    
     parser.add_argument('--skip-quast', action = 'store_true', help = 'Skip Quast and proceed to filtering')
-
-    parser.add_argument('--copy', action = 'store_true', help = 'Create file copies rather than symlinks')
 
     return parser.parse_args()
 
@@ -238,35 +235,22 @@ def merge_bad(*args):
                 bad.add(genome)
     return bad
 
-def extract_good(parent_dir, prefix, all_bad, copy_func):
-    '''Symlinks good genomes to new folders in the parent_dir'''
+def axe_bad(parent_dir, all_bad):
     
-    fasta_dirs = [d for d in os.listdir(parent_dir) if 'quast_report' not in d]
-    
+    fasta_dir = [d for d in os.listdir(parent_dir) if 'quast_report' not in d]
+
     for fasta_dir in fasta_dirs:
-        
-        outdir = os.path.join(parent_dir, fasta_dir + '_filtered')
+
         full_fasta_dir_path = os.path.join(parent_dir, fasta_dir)
-        
-        if not os.access(outdir, os.F_OK):
-            os.mkdir(outdir)
-        
-        
-        for fasta in os.listdir(full_fasta_dir_path):
-            
-            fas = os.path.basename(fasta).rstrip('.fasta')
-            
-            if fas not in all_bad:
 
-                src = os.path.join(full_fasta_dir_path, fasta)
-                dst = os.path.join(outdir, fix_name(fas, prefix) + '.fasta')
+        for f in os.listdir(full_fasta_dir_path):
 
-                try:
-                    copy_func(src, dst)
+            if f[:f.endswith('.fasta') and f.rfind('.fasta')] in all_bad:
                 
+                try:
+                    os.remove( os.path.join(full_fasta_dir_path, fasta)
                 except OSError:
-                    os.remove(dst) # os.symlink fails if dst already exists
-                    copy_func(src, dst)
+                    print("Encountered error removing {}".format(fasta))
 
 def write_reasons(*args):
     '''Write a list of bad genomes to the relevant
@@ -304,8 +288,6 @@ def main():
     
     version_control.commit(args.fasta_parent_dir, args)
 
-    copy_func = copyfile if args.copy else os.symlink
-    
     gc_filter_contigs(args.fasta_parent_dir, args.fragment, args.min_contig,
             args.gc_cutoff, args.organism, args.hits)
 
@@ -325,10 +307,9 @@ def main():
     all_bad = merge_bad(duds, bad_gc, bad_size, bad_names)
     
     write_reasons(duds, bad_gc, bad_size, bad_names)
-
-    extract_good(args.fasta_parent_dir, args.prefix, all_bad, copy_func)
     
-    # temporary diagnostic placement - move later
+    axe_bad(parent_dir, all_bad)
+     
     version_control.commit(args.fasta_parent_dir, args)
 
 if __name__ == '__main__':
