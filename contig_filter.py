@@ -1,6 +1,7 @@
 from Bio.Blast import NCBIWWW, NCBIXML
 from Bio import SeqIO
 from time import sleep
+from multiprocessing import Pool
 import os
 import argparse
 
@@ -86,9 +87,51 @@ def select_checkables(fasta_dir, fragment, min_contig, low, high):
             except ZeroDivisionError:
                 del checkables[fasta] # Wouldn't have been queried anyway
             
-    return checkables
+    remove_bad_contigsurn checkables
 
-def query_genbank(checkable, organism, hits):
+def format_queries(checkables, taxid, hits, organism, delay):
+
+    delay = 0
+    
+    for fasta in checkables:
+        for contig in checkables[fasta]:
+            
+            yield (checkables[fasta], taxid, hits, organism, delay)
+
+            delay += 1 # so as not to spam GenBank, 
+                       # queries are spaced ~1 second apart
+
+def manage_queries(checkables, taxid, hits, organism, delay):
+
+    for q in format_queries(checkables, taxid, hits, organism, delay):
+        pass # multiprocessing.Pool and apply_async goes here 
+
+def query(fasta_name, contig_name, fragment, taxid, hits, organism, delay):
+   
+    # staggers queries to not spam NCBI
+    sleep(delay)
+     
+    txid = '{}[taxid]'.format(taxid) if taxid != None else '(none)'
+    
+    handle = NCBIWWW.qblast('blastn', 'nt', fragment, 
+             megablast = True, entrez_query = txid, hitlist_size = hits,
+             alignments = hits)
+
+                            
+    record = NCBIXML.read(handle)
+
+    correct_organism = []
+
+    for aln in record.alignments:
+        for hsp in aln.hsps:
+            correct_organism.append(organism.lower() in aln.title.lower())
+
+    # Return tuple with names here because result order is not guaranteed
+    # with apply_async and callback logging
+    return fasta_name, contig_name, any(correct_organism)
+
+
+def query_genbank(checkable, organism, taxid, hits):
     '''Any contigs identified in select_checkables() are queried against
     NCBI GenBank using a fragment from the beginning of the contig. 
     
@@ -116,7 +159,7 @@ def query_genbank(checkable, organism, hits):
                 axe[fasta].append(contig)
             
             sleep(2) # avoid hitting NCBI with too many requests
-    print axe
+    
     return axe
 
 def remove_bad_contigs(axe):
