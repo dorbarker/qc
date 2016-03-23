@@ -1,9 +1,10 @@
-from Bio.Blast import NCBIWWW, NCBIXML
+from Bio.Blast import NCBIXML
+from Bio.Blast.Applications import NcbiblastnCommandline as blastn
 from Bio import SeqIO
-from time import sleep
-from multiprocessing import Pool
+from multiprocessing import Pool, cpu_count
 import os
 import argparse
+from StringIO import StringIO
 
 def arguments():
 
@@ -12,6 +13,8 @@ def arguments():
     parser.add_argument('--fasta-dir', required = True,
                         help = 'Directory containing FASTA files')
     
+    parser.add_argument('--db', required = True, help = 'Path to nt database')
+
     parser.add_argument('--organism', required = True,
                         help = 'Name of the organism the contigs \
                                 *should* be from.')
@@ -19,7 +22,8 @@ def arguments():
     parser.add_argument('--gc-cutoff', nargs = 2, type = float,
                         required = True, metavar = ('LOW', 'HIGH'), 
                         help = 'GC contents outside this range \
-                                will be queried against GenBank')
+                                will be queried against nt')
+
     parser.add_argument('--min-contig', type = int, default = 500,
                         help = 'Minimum contig size for inclusion (default = 500 bp)')
 
@@ -27,15 +31,15 @@ def arguments():
                         help = 'Size (bp) of contig fragment used to query \
                                 GenBank (default = 100)')
     
-    parser.add_argument('--hits', type = int, default = 50,
-                        help = 'Number top hits to consider (default = 50)')
+    parser.add_argument('--cores', type = int, default = cpu_count,
+                        help = 'Number of CPU cores to use')
 
     return parser.parse_args()
 
 def gc_content(seq):
-     '''Returns GC content of seq'''
+    '''Returns GC content of seq'''
 
-     return 100.0 * sum(1.0 for x in seq if x in ('G','C')) / len(seq)
+    return 100.0 * sum(1.0 for x in seq if x in ('G','C')) / len(seq)
 
 def select_checkables(fasta_dir, fragment, min_contig, low, high):
     '''Checks each contig in each FASTA for GC content.
@@ -47,13 +51,13 @@ def select_checkables(fasta_dir, fragment, min_contig, low, high):
     too_short = {}
 
     for fasta in (os.path.join(fasta_dir, x) for x in os.listdir(fasta_dir)):
-        
+ 
         checkables[fasta] = {}
 
         too_short[fasta] = []
-        
+ 
         with open(fasta, 'r') as f:
-            
+ 
             records = 0.0
             total_len = 0.0
             bad_len = 0.0
@@ -87,85 +91,50 @@ def select_checkables(fasta_dir, fragment, min_contig, low, high):
             except ZeroDivisionError:
                 del checkables[fasta] # Wouldn't have been queried anyway
             
-    remove_bad_contigsurn checkables
+    return checkables, too_short
 
-def format_queries(checkables, taxid, hits, organism, delay):
+def format_queries(checkables, organism, db_path):
 
-    delay = 0
-    
     for fasta in checkables:
         for contig in checkables[fasta]:
             
-            yield (checkables[fasta], taxid, hits, organism, delay)
+            q = checkables[fasta][contig]
+            yield (fasta, contig, q, db_path, organism)
 
-            delay += 1 # so as not to spam GenBank, 
-                       # queries are spaced ~1 second apart
-
-def manage_queries(checkables, taxid, hits, organism, delay):
-
-    for q in format_queries(checkables, taxid, hits, organism, delay):
-        pass # multiprocessing.Pool and apply_async goes here 
-
-def query(fasta_name, contig_name, fragment, taxid, hits, organism, delay):
+def dispatch_queries(checkables, organism, db_path, cores):
    
-    # staggers queries to not spam NCBI
-    sleep(delay)
-     
-    txid = '{}[taxid]'.format(taxid) if taxid != None else '(none)'
+    queries = format_queries(checkables, organism, db_path)
     
-    handle = NCBIWWW.qblast('blastn', 'nt', fragment, 
-             megablast = True, entrez_query = txid, hitlist_size = hits,
-             alignments = hits)
+    p = Pool(processes = cores)
 
-                            
-    record = NCBIXML.read(handle)
+    results = [p.apply_async(query, args) for args in queries]
 
-    correct_organism = []
+    return [m.get() for m in results] 
+
+
+def query(fasta, contig, q, db_path, organism):
+ 
+    search = blastn(query = StringIO(q), db = db_path, outfmt = 5)
+
+    stdout, stderr = search()
+
+    record = NCBIXML.read(stdout)
+
+    correct = []
 
     for aln in record.alignments:
         for hsp in aln.hsps:
-            correct_organism.append(organism.lower() in aln.title.lower())
+            correct.append(organism.lower() in aln.title.lower())
 
-    # Return tuple with names here because result order is not guaranteed
-    # with apply_async and callback logging
-    return fasta_name, contig_name, any(correct_organism)
+    return (fasta, contig, any(correct))
 
 
-def query_genbank(checkable, organism, taxid, hits):
-    '''Any contigs identified in select_checkables() are queried against
-    NCBI GenBank using a fragment from the beginning of the contig. 
+def remove_bad_contigs(fasta_dir, axe):
+    '''Overwrites FASTAs minus any contigs flagged in query()'''
+
+    fastas = (os.path.join(fasta_dir, x) for x in os.listdir(fasta_dir))
     
-    If the `organism` CLI argument is not found retrieved hits,
-    the contig is flagged for removal
-    '''
-
-    axe = {}
-
-    for fasta in checkable:
-        axe[fasta] = []
-        for contig in checkable[fasta]:
-            handle = NCBIWWW.qblast('blastn', 'nt', checkable[fasta][contig],
-                     megablast = True, hitlist_size = hits, alignments = hits)
-
-            record = NCBIXML.read(handle)
-
-            cj_in_title = []
-
-            for aln in record.alignments:
-                for hsp in aln.hsps:
-                    cj_in_title.append(organism.lower() in aln.title.lower())
-                            
-            if not any(cj_in_title):
-                axe[fasta].append(contig)
-            
-            sleep(2) # avoid hitting NCBI with too many requests
-    
-    return axe
-
-def remove_bad_contigs(axe):
-    '''Overwrites FASTAs minus any contigs flagged in query_genbank()'''
-
-    for fasta in axe:
+    for fasta in fastas:
         towrite = []
         with open(fasta, 'r') as f:
             for rec in SeqIO.parse(f, 'fasta'):
@@ -175,28 +144,56 @@ def remove_bad_contigs(axe):
                 if name not in axe[fasta]:
                     towrite.append(rec)
                 else:
-                    print "Removing contig {} from FASTA {}".format(name, fasta)
+                    msg = 'Removed contig {} from FASTA {}'.format(name, fasta)
+                    print(msg)
         
         with open(fasta, 'w') as j:
 
             SeqIO.write(towrite, j, 'fasta')
 
-def filter_contigs(fasta_dir, fragment, min_contig, gc_cutoff,  organism, hits):
+def make_axe_dict(blast_results, too_short):
+
+    axe = {}
+
+    bad_blast = filter(lambda x: not x[2], blast_results)
+
+    for i in bad_blast:
+        try:
+            axe[i[0]].add(i[1])
+        except KeyError:
+            axe[i[0]] = set([i[1]])
+    
+    for j in too_short:
+        
+        cur_set = set(too_short[j])
+
+        try:
+            axe[j] = axe[j] | cur_set
+
+        except KeyError:
+            axe[j] = cur_set 
+    
+    return axe 
+
+def filter_contigs(fasta_dir, frag, min_contig, gc_cutoff, organism, db, cores):
     '''All functions except the argument parser.'''
     
-    checkable = select_checkables(fasta_dir, fragment, min_contig, *gc_cutoff)
-    
-    axe = query_genbank(checkable, organism, hits)
-    
-    remove_bad_contigs(axe)
+    checkables, too_short  = select_checkables(fasta_dir, frag, 
+                                               min_contig, *gc_cutoff)
+   
+    blast_results = dispatch_queries(checkables, organism, db, cores)
 
+    axe = make_axe_dict(blast_results, too_short)
+
+    remove_bad_contigs(axe)
 
 def main():
 
     args = arguments()
     
     filter_contigs(args.fasta_dir, args.fragment, args.min_contig, 
-            args.gc_cutoff, args.gc_cutoff, args.organism, args.hits)
+                   args.gc_cutoff, args.gc_cutoff, args.organism, args.hits)
+
 
 if __name__ == '__main__':
     main()
