@@ -4,7 +4,7 @@ from Bio import SeqIO
 from multiprocessing import Pool, cpu_count
 import os
 import argparse
-from StringIO import StringIO
+from io import StringIO
 
 def arguments():
 

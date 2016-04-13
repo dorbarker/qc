@@ -1,6 +1,9 @@
+#!/usr/bin/env python3
+
 import argparse
 import os
 import subprocess
+import sys
 import contig_filter
 import version_control
 from multiprocessing import cpu_count
@@ -17,6 +20,8 @@ def arguments():
 
     parser.add_argument('--size-cutoff', nargs = 2, type = int, metavar = ('LOW', 'HIGH'), required = True,
                         help = 'Lower and upper bounds of genome size (bp)')
+    
+    parser.add_argument('--db', required = True, help = 'Path to nt database') 
     
     parser.add_argument('--prefix', nargs = '+', help = 'Prefices to consider when removing duplicates')
     
@@ -35,6 +40,7 @@ def arguments():
     parser.add_argument('--cores', type = int, default = cpu_count(), help = 'CPUs to use')
    
     parser.add_argument('--skip-quast', action = 'store_true', help = 'Skip Quast and proceed to filtering')
+
 
     return parser.parse_args()
 
@@ -248,9 +254,9 @@ def axe_bad(parent_dir, all_bad):
             if f[:f.endswith('.fasta') and f.rfind('.fasta')] in all_bad:
                 
                 try:
-                    os.remove( os.path.join(full_fasta_dir_path, fasta)
+                    os.remove( os.path.join(full_fasta_dir_path, fasta))
                 except OSError:
-                    print("Encountered error removing {}".format(fasta))
+                    print("Encountered error removing {}".format(fasta), file = sys.stderr)
 
 def write_reasons(*args):
     '''Write a list of bad genomes to the relevant
@@ -268,7 +274,7 @@ def write_reasons(*args):
         with open(os.path.join(d, 'bad_genomes.txt'), 'w') as f:
             f.write( '\n'.join(set(bydir[d])) )
 
-def gc_filter_contigs(parent_dir, fragment, min_contig, gc_cutoff, organism, hits):
+def gc_filter_contigs(parent_dir, fragment, min_contig, gc_cutoff, organism, hits, db):
     '''Check individual contigs for GC content.
 
     Contigs with out-of-range GC content are checked against GenBank.
@@ -280,7 +286,7 @@ def gc_filter_contigs(parent_dir, fragment, min_contig, gc_cutoff, organism, hit
 
     for fasta_dir in fasta_dirs:
         contig_filter.filter_contigs(fasta_dir, fragment, min_contig,
-                                    gc_cutoff, organism, hits)
+                                    gc_cutoff, organism, hits, db)
         
 def main():
     
@@ -289,7 +295,7 @@ def main():
     version_control.commit(args.fasta_parent_dir, args)
 
     gc_filter_contigs(args.fasta_parent_dir, args.fragment, args.min_contig,
-            args.gc_cutoff, args.organism, args.hits)
+            args.gc_cutoff, args.organism, args.hits, args.db)
 
     if not args.skip_quast:
         run_quast(args.fasta_parent_dir, args.min_contig, args.cores)
