@@ -107,23 +107,9 @@ def dispatch_queries(checkables, organism, db_path, cores):
     
     p = Pool(processes = cores)
 
-<<<<<<< HEAD
-    axe = {}
-    
-    for fasta in checkable:
-        
-        axe[fasta] = []
-        
-        for contig in checkable[fasta]:
-       
-            handle = NCBIWWW.qblast('blastn', 'nt', checkable[fasta][contig],
-                     megablast = True, hitlist_size = hits, alignments = hits)
-=======
     results = [p.apply_async(query, args) for args in queries]
 
     return [m.get() for m in results] 
->>>>>>> blast_optimize
-
 
 def query(fasta, contig, q, db_path, organism):
  
@@ -141,20 +127,6 @@ def query(fasta, contig, q, db_path, organism):
 
     return (fasta, contig, any(correct))
 
-<<<<<<< HEAD
-            for aln in record.alignments:
-                for hsp in aln.hsps:
-                    cj_in_title.append(organism.lower() in aln.title.lower())
-                            
-            if not any(cj_in_title):
-                axe[fasta].append(contig)
-            
-            sleep(2) # avoid hitting NCBI with too many requests
-    print(axe)
-    return axe
-=======
->>>>>>> blast_optimize
-
 def remove_bad_contigs(fasta_dir, axe):
     '''Overwrites FASTAs minus any contigs flagged in query()'''
 
@@ -170,12 +142,8 @@ def remove_bad_contigs(fasta_dir, axe):
                 if name not in axe[fasta]:
                     towrite.append(rec)
                 else:
-<<<<<<< HEAD
-                    print("Removing contig {} from FASTA {}".format(name, fasta))
-=======
                     msg = 'Removed contig {} from FASTA {}'.format(name, fasta)
                     print(msg)
->>>>>>> blast_optimize
         
         with open(fasta, 'w') as j:
 
